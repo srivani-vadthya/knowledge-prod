@@ -1,0 +1,25 @@
+openapi: "3.0.0"
+info:
+  title: "Knowledge Assistant Agent"
+  version: "1.0.0"
+  description: "Enterprise knowledge assistant for document-based Q&A using RAG (Retrieval Augmented Generation). Upload documents and query them using natural language."
+servers:
+  - url: "https://py-agent-knowledgeassistant-8bby.onrender.com"
+paths:
+  /execute:
+    post:
+      summary: "Trigger Agent Node Action"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                query:
+                  type: string
+                limit:
+                  type: integer
+      responses:
+        '200':
+          description: "Success response containing dynamic output payload"
