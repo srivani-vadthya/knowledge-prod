@@ -33,7 +33,7 @@ def check_pinecone_status():
             print("\n❌ WARNING: No vectors found in Pinecone!")
             print("   The PDF might not have been uploaded to Pinecone.")
             print("\n💡 To upload the PDF to Pinecone:")
-            print("   1. Run the Streamlit app: streamlit run app.py")
+            print("   1. Run the React app from frontend/: npm run dev")
             print("   2. Upload the PDF using the sidebar")
             print("   3. Click 'Upload to Pinecone' button")
             return False
@@ -115,11 +115,11 @@ def main():
         print("\n✅ Everything looks good! Your PDF is in Pinecone and ready to use.")
         print("\n🚀 You can now:")
         print("   1. Test the API: python test_effective_java.py")
-        print("   2. Use the Streamlit app: streamlit run app.py")
+        print("   2. Use the React app from frontend/: npm run dev")
         print("   3. Integrate with external platforms (Teams, Slack, WhatsApp)")
     else:
         print("\n⚠️ Action Required:")
-        print("   1. Run: streamlit run app.py")
+        print("   1. Run the React app from frontend/: npm run dev")
         print("   2. Upload your PDF using the sidebar")
         print("   3. Click 'Upload to Pinecone' button")
         print("   4. Run this script again to verify")

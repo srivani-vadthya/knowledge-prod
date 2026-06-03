@@ -22,6 +22,9 @@ class Metrics:
         self.requests_by_status = {}
         self.response_times = []
         self.errors_total = 0
+        self.estimated_prompt_tokens = 0
+        self.estimated_completion_tokens = 0
+        self.estimated_total_tokens = 0
     
     def record_request(self, endpoint: str, status_code: int, duration: float):
         self.requests_total += 1
@@ -39,10 +42,18 @@ class Metrics:
             "requests_by_endpoint": self.requests_by_endpoint,
             "requests_by_status": self.requests_by_status,
             "errors_total": self.errors_total,
+            "estimated_prompt_tokens": self.estimated_prompt_tokens,
+            "estimated_completion_tokens": self.estimated_completion_tokens,
+            "estimated_total_tokens": self.estimated_total_tokens,
             "avg_response_time_ms": round(avg_response_time * 1000, 2),
             "p95_response_time_ms": self._percentile(95) if self.response_times else 0,
             "p99_response_time_ms": self._percentile(99) if self.response_times else 0
         }
+
+    def record_token_estimate(self, prompt_tokens: int, completion_tokens: int):
+        self.estimated_prompt_tokens += max(prompt_tokens, 0)
+        self.estimated_completion_tokens += max(completion_tokens, 0)
+        self.estimated_total_tokens = self.estimated_prompt_tokens + self.estimated_completion_tokens
     
     def _percentile(self, p: int) -> float:
         if not self.response_times:

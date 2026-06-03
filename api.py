@@ -8,6 +8,7 @@ from openai import OpenAI
 from answer_confidence import simple_answer_confidence
 from ingest import ingest_document
 from observability import logger, metrics, trace_request, log_agent_execution, request_id_var
+from utils import load_indexed_docs, save_indexed_doc
 import os
 import shutil
 from dotenv import load_dotenv
@@ -119,6 +120,10 @@ class ExecuteRequest(BaseModel):
 class ExecuteResponse(BaseModel):
     result: dict  # Dynamic output payload as per their spec
 
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate for admin usage metrics."""
+    return max(1, len((text or "").strip()) // 4) if text else 0
+
 # Exception handler for validation errors
 @app.exception_handler(ValueError)
 async def value_error_handler(request, exc):
@@ -171,6 +176,15 @@ async def get_metrics():
     """Get API metrics"""
     return metrics.get_metrics()
 
+@app.get("/documents")
+async def get_documents():
+    """Get locally tracked indexed documents"""
+    documents = load_indexed_docs()
+    return {
+        "documents": documents,
+        "count": len(documents)
+    }
+
 @app.post("/ask", response_model=QuestionResponse, responses={
     400: {"model": ErrorResponse, "description": "Bad Request - Invalid input"},
     500: {"model": ErrorResponse, "description": "Internal Server Error"}
@@ -222,6 +236,10 @@ async def ask_question(request: QuestionRequest):
             confidence_score,
             len(sources)
         )
+        metrics.record_token_estimate(
+            prompt_tokens=estimate_tokens(request.question),
+            completion_tokens=estimate_tokens(answer),
+        )
         
         return QuestionResponse(
             answer=answer,
@@ -269,6 +287,7 @@ async def upload_document(file: UploadFile = File(...)):
 
     try:
         vector_count = ingest_document(file_path)
+        save_indexed_doc(file.filename)
         logger.info("Document indexed successfully", filename=file.filename, chunks=vector_count)
         return {"status": "success", "filename": file.filename, "chunks_indexed": vector_count}
     except Exception as e:
@@ -302,6 +321,11 @@ async def execute_agent(request: ExecuteRequest):
             for source in result.get("sources", [])[:3]
         ]
         
+        metrics.record_token_estimate(
+            prompt_tokens=estimate_tokens(request.query),
+            completion_tokens=estimate_tokens(answer),
+        )
+
         return {
             "status": "success",
             "answer": answer,

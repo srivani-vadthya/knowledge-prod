@@ -18,3 +18,15 @@ services:
         value: aws
       - key: PINECONE_REGION
         value: us-east-1
+
+  - type: web
+    name: knowledge-assistant-web
+    runtime: docker
+    dockerfilePath: ./Dockerfile.frontend
+    envVars:
+      - key: VITE_API_BASE_URL
+        sync: false
+      - key: VITE_ADMIN_CODE
+        sync: false
+      - key: VITE_USER_CODE
+        sync: false
