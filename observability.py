@@ -22,15 +22,18 @@ class Metrics:
         self.requests_by_status = {}
         self.response_times = []
         self.errors_total = 0
-        self.estimated_prompt_tokens = 0
-        self.estimated_completion_tokens = 0
-        self.estimated_total_tokens = 0
+        self.tokens_input_total = 0
+        self.tokens_output_total = 0
+        self.tokens_total = 0
     
-    def record_request(self, endpoint: str, status_code: int, duration: float):
+    def record_request(self, endpoint: str, status_code: int, duration: float, tokens_input: int = 0, tokens_output: int = 0):
         self.requests_total += 1
         self.requests_by_endpoint[endpoint] = self.requests_by_endpoint.get(endpoint, 0) + 1
         self.requests_by_status[status_code] = self.requests_by_status.get(status_code, 0) + 1
         self.response_times.append(duration)
+        self.tokens_input_total += tokens_input
+        self.tokens_output_total += tokens_output
+        self.tokens_total += (tokens_input + tokens_output)
         
         if status_code >= 400:
             self.errors_total += 1
@@ -42,18 +45,20 @@ class Metrics:
             "requests_by_endpoint": self.requests_by_endpoint,
             "requests_by_status": self.requests_by_status,
             "errors_total": self.errors_total,
-            "estimated_prompt_tokens": self.estimated_prompt_tokens,
-            "estimated_completion_tokens": self.estimated_completion_tokens,
-            "estimated_total_tokens": self.estimated_total_tokens,
+            "tokens_input_total": self.tokens_input_total,
+            "tokens_output_total": self.tokens_output_total,
+            "tokens_total": self.tokens_total,
+            "estimated_cost_usd": self._estimate_cost(),
             "avg_response_time_ms": round(avg_response_time * 1000, 2),
             "p95_response_time_ms": self._percentile(95) if self.response_times else 0,
             "p99_response_time_ms": self._percentile(99) if self.response_times else 0
         }
 
-    def record_token_estimate(self, prompt_tokens: int, completion_tokens: int):
-        self.estimated_prompt_tokens += max(prompt_tokens, 0)
-        self.estimated_completion_tokens += max(completion_tokens, 0)
-        self.estimated_total_tokens = self.estimated_prompt_tokens + self.estimated_completion_tokens
+    def _estimate_cost(self) -> float:
+        """Estimate cost based on gpt-4o-mini pricing: $0.150/1M input, $0.600/1M output"""
+        input_cost = (self.tokens_input_total / 1_000_000) * 0.150
+        output_cost = (self.tokens_output_total / 1_000_000) * 0.600
+        return round(input_cost + output_cost, 4)
     
     def _percentile(self, p: int) -> float:
         if not self.response_times:
@@ -137,7 +142,19 @@ def trace_request(endpoint_name: str):
                 raise
             finally:
                 duration = time.time() - start_time
-                metrics.record_request(endpoint_name, status_code, duration)
+                
+                # Extract token counts if this is the /ask endpoint
+                tokens_input = 0
+                tokens_output = 0
+                if endpoint_name == "ask_question" and not error:
+                    try:
+                        # Access result from the wrapped function if available
+                        tokens_input = getattr(result, 'tokens_input', 0)
+                        tokens_output = getattr(result, 'tokens_output', 0)
+                    except:
+                        pass
+                
+                metrics.record_request(endpoint_name, status_code, duration, tokens_input, tokens_output)
                 
                 logger.info(
                     f"Request completed: {endpoint_name}",

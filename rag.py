@@ -31,7 +31,16 @@ def search_knowledge_base(query, top_k=5):
     seen_docs = set()
     for match in matches:
         metadata = match.get("metadata", {})
-        doc_name = metadata.get("source", "Unknown")
+        if metadata.get("source") == "ServiceNow":
+            article_number = metadata.get("number")
+            article_title = metadata.get("title")
+            doc_name = "ServiceNow"
+            if article_number and article_title:
+                doc_name = f"ServiceNow: {article_number} - {article_title}"
+            elif article_number or article_title:
+                doc_name = f"ServiceNow: {article_number or article_title}"
+        else:
+            doc_name = metadata.get("source", "Unknown")
         page_num = metadata.get("page")
         score = match.get("score", 0.0)
 

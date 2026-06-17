@@ -12,6 +12,20 @@ import pandas as pd
 from pptx import Presentation
 import markdown
 from bs4 import BeautifulSoup
+from PIL import Image
+import io
+import base64
+try:
+    import easyocr
+    EASYOCR_AVAILABLE = True
+except ImportError:
+    EASYOCR_AVAILABLE = False
+
+try:
+    import pytesseract
+    PYTESSERACT_AVAILABLE = True
+except ImportError:
+    PYTESSERACT_AVAILABLE = False
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
@@ -20,13 +34,200 @@ CHUNK_SIZE = 800
 CHUNK_OVERLAP = 100
 EMBED_BATCH_SIZE = 64
 UPSERT_BATCH_SIZE = 100
+OCR_ENGINE = os.getenv("OCR_ENGINE", "easyocr")  # easyocr or tesseract
+VISION_MODEL = os.getenv("VISION_MODEL", "gpt-4o-mini")  # OpenAI vision model
+ENABLE_IMAGE_PROCESSING = os.getenv("ENABLE_IMAGE_PROCESSING", "true").lower() == "true"
+
+
+def extract_images_from_pdf(file_path):
+    """Extract images from PDF pages"""
+    images = []
+    try:
+        pdf_document = fitz.open(file_path)
+        for page_num in range(len(pdf_document)):
+            page = pdf_document[page_num]
+            image_list = page.get_images(full=True)
+            
+            for img_index, img in enumerate(image_list):
+                xref = img[0]
+                base_image = pdf_document.extract_image(xref)
+                image_bytes = base_image["image"]
+                
+                # Convert to PIL Image
+                image = Image.open(io.BytesIO(image_bytes))
+                
+                # Skip very small images (likely icons/logos)
+                if image.width < 100 or image.height < 100:
+                    continue
+                
+                images.append({
+                    "image": image,
+                    "page": page_num + 1,
+                    "index": img_index,
+                })
+        
+        pdf_document.close()
+    except Exception as e:
+        print(f"Error extracting images: {str(e)}")
+    
+    return images
+
+
+def ocr_image(image):
+    """Extract text from image using OCR"""
+    text = ""
+    
+    try:
+        if OCR_ENGINE == "easyocr" and EASYOCR_AVAILABLE:
+            reader = easyocr.Reader(['en'], gpu=False)
+            # Convert PIL Image to numpy array
+            import numpy as np
+            img_array = np.array(image)
+            results = reader.readtext(img_array, detail=0)
+            text = " ".join(results)
+        
+        elif OCR_ENGINE == "tesseract" and PYTESSERACT_AVAILABLE:
+            text = pytesseract.image_to_string(image)
+        
+        else:
+            # Fallback: no OCR available
+            text = ""
+    
+    except Exception as e:
+        print(f"OCR error: {str(e)}")
+        text = ""
+    
+    return text.strip()
+
+
+def describe_image_with_vision(image, client):
+    """Use OpenAI Vision API to describe image content"""
+    try:
+        # Convert PIL Image to base64
+        buffered = io.BytesIO()
+        image.save(buffered, format="PNG")
+        img_base64 = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        response = client.chat.completions.create(
+            model=VISION_MODEL,
+            messages=[
+                {
+                    "role": "user",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "Describe this image in detail. Focus on any text, diagrams, charts, tables, or important visual information that would be useful for document understanding."
+                        },
+                        {
+                            "type": "image_url",
+                            "image_url": {
+                                "url": f"data:image/png;base64,{img_base64}"
+                            }
+                        }
+                    ]
+                }
+            ],
+            max_tokens=500
+        )
+        
+        return response.choices[0].message.content.strip()
+    
+    except Exception as e:
+        print(f"Vision API error: {str(e)}")
+        return ""
+
+
+def process_pdf_with_images(file_path, client):
+    """Process PDF extracting both text and image content"""
+    documents = []
+    
+    print(f"[IMAGE PROCESSING] Processing PDF: {os.path.basename(file_path)}")
+    
+    # Extract regular text
+    try:
+        pdf = fitz.open(file_path)
+        text_pages = 0
+        for page_number, page in enumerate(pdf, start=1):
+            text = page.get_text("text").strip()
+            if text:
+                documents.append({
+                    "text": text,
+                    "metadata": {
+                        "source": os.path.basename(file_path),
+                        "page": page_number,
+                        "type": "text"
+                    },
+                })
+                text_pages += 1
+        pdf.close()
+        print(f"[IMAGE PROCESSING] Extracted text from {text_pages} pages")
+    except Exception as e:
+        print(f"Error extracting text: {str(e)}")
+    
+    # Extract and process images
+    if ENABLE_IMAGE_PROCESSING:
+        print(f"[IMAGE PROCESSING] Extracting images...")
+        images = extract_images_from_pdf(file_path)
+        print(f"[IMAGE PROCESSING] Found {len(images)} images (>100x100px)")
+        
+        for i, img_data in enumerate(images, 1):
+            image = img_data["image"]
+            page_num = img_data["page"]
+            
+            print(f"[IMAGE PROCESSING] Processing image {i}/{len(images)} - Page {page_num}, Size: {image.width}x{image.height}")
+            
+            # Run OCR
+            print(f"[IMAGE PROCESSING]   → Running OCR ({OCR_ENGINE})...")
+            ocr_text = ocr_image(image)
+            if ocr_text:
+                print(f"[IMAGE PROCESSING]   → OCR extracted {len(ocr_text)} characters")
+            else:
+                print(f"[IMAGE PROCESSING]   → OCR: No text detected")
+            
+            # Run Vision model
+            print(f"[IMAGE PROCESSING]   → Running Vision API ({VISION_MODEL})...")
+            vision_description = describe_image_with_vision(image, client)
+            if vision_description:
+                print(f"[IMAGE PROCESSING]   → Vision API returned {len(vision_description)} characters")
+            else:
+                print(f"[IMAGE PROCESSING]   → Vision API: No description")
+            
+            # Combine OCR and Vision results
+            combined_text = ""
+            if ocr_text:
+                combined_text += f"OCR Text: {ocr_text}\n\n"
+            if vision_description:
+                combined_text += f"Image Description: {vision_description}"
+            
+            if combined_text.strip():
+                documents.append({
+                    "text": combined_text,
+                    "metadata": {
+                        "source": os.path.basename(file_path),
+                        "page": page_num,
+                        "type": "image",
+                        "image_index": img_data["index"]
+                    },
+                })
+                print(f"[IMAGE PROCESSING]   ✓ Image content indexed")
+    
+    print(f"[IMAGE PROCESSING] Complete: {len(documents)} total documents (text + images)")
+    return documents
 
 
 def load_documents(file_path):
     """Load documents from various file formats"""
     
-    # PDF Processing
+    # PDF Processing with image support
     if file_path.endswith(".pdf"):
+        # Use enhanced image processing if enabled
+        if ENABLE_IMAGE_PROCESSING:
+            client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+            documents = process_pdf_with_images(file_path, client)
+            if documents:
+                return documents
+        
+        # Fallback to standard PDF processing
         documents = []
         try:
             pdf = fitz.open(file_path)

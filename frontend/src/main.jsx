@@ -60,6 +60,91 @@ function StatusPill({ health, loading }) {
   );
 }
 
+function renderInlineMarkdown(text) {
+  const parts = String(text).split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+  return parts.map((part, index) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={index}>{part.slice(2, -2)}</strong>;
+    }
+    if (part.startsWith("`") && part.endsWith("`")) {
+      return <code key={index}>{part.slice(1, -1)}</code>;
+    }
+    return <React.Fragment key={index}>{part}</React.Fragment>;
+  });
+}
+
+function MarkdownAnswer({ text }) {
+  const lines = String(text || "").split(/\r?\n/);
+  const blocks = [];
+  let index = 0;
+
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+
+    if (!trimmed) {
+      index += 1;
+      continue;
+    }
+
+    const heading = trimmed.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const HeadingTag = heading[1].length <= 2 ? "h3" : "h4";
+      blocks.push(<HeadingTag key={index}>{renderInlineMarkdown(heading[2])}</HeadingTag>);
+      index += 1;
+      continue;
+    }
+
+    if (/^[-*]\s+/.test(trimmed)) {
+      const items = [];
+      while (index < lines.length && /^[-*]\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^[-*]\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ul key={index}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ul>
+      );
+      continue;
+    }
+
+    if (/^\d+\.\s+/.test(trimmed)) {
+      const items = [];
+      while (index < lines.length && /^\d+\.\s+/.test(lines[index].trim())) {
+        items.push(lines[index].trim().replace(/^\d+\.\s+/, ""));
+        index += 1;
+      }
+      blocks.push(
+        <ol key={index}>
+          {items.map((item, itemIndex) => (
+            <li key={itemIndex}>{renderInlineMarkdown(item)}</li>
+          ))}
+        </ol>
+      );
+      continue;
+    }
+
+    const paragraph = [trimmed];
+    index += 1;
+    while (
+      index < lines.length &&
+      lines[index].trim() &&
+      !/^(#{1,4})\s+/.test(lines[index].trim()) &&
+      !/^[-*]\s+/.test(lines[index].trim()) &&
+      !/^\d+\.\s+/.test(lines[index].trim())
+    ) {
+      paragraph.push(lines[index].trim());
+      index += 1;
+    }
+    blocks.push(<p key={index}>{renderInlineMarkdown(paragraph.join(" "))}</p>);
+  }
+
+  return <div className="markdown-answer">{blocks}</div>;
+}
+
 function LoginScreen({ onLogin }) {
   const [role, setRole] = useState("user");
   const [name, setName] = useState("");
@@ -203,7 +288,7 @@ function DocumentsSection({ documents, documentsLoading }) {
   );
 }
 
-function AdminPanel({ metrics, health, healthLoading, onRefresh, onClearChat }) {
+function AdminPanel({ metrics, health, healthLoading, syncState, onRefresh, onClearChat, onSyncServiceNow }) {
   return (
     <section className="admin-panel">
       <div className="section-title">
@@ -214,7 +299,8 @@ function AdminPanel({ metrics, health, healthLoading, onRefresh, onClearChat }) 
         <MetricCard label="Requests" value={formatNumber(metrics?.requests_total)} icon={<Activity size={15} />} />
         <MetricCard label="Errors" value={formatNumber(metrics?.errors_total)} icon={<AlertCircle size={15} />} />
         <MetricCard label="Avg ms" value={formatNumber(metrics?.avg_response_time_ms)} icon={<Activity size={15} />} />
-        <MetricCard label="Tokens" value={formatNumber(metrics?.estimated_total_tokens)} icon={<Sparkles size={15} />} />
+        <MetricCard label="Tokens" value={formatNumber(metrics?.tokens_total)} icon={<Sparkles size={15} />} />
+        <MetricCard label="Cost" value={`$${metrics?.estimated_cost_usd?.toFixed(2) || "0.00"}`} icon={<Sparkles size={15} />} />
       </div>
 
       <div className="maintenance-box">
@@ -238,9 +324,16 @@ function AdminPanel({ metrics, health, healthLoading, onRefresh, onClearChat }) 
           <RefreshCw size={15} />
           Refresh system
         </button>
+        <button className="mini-button" type="button" onClick={onSyncServiceNow} disabled={syncState.loading}>
+          {syncState.loading ? <Loader2 className="spin" size={15} /> : <Database size={15} />}
+          {syncState.loading ? "Syncing ServiceNow" : "Sync ServiceNow"}
+        </button>
         <button className="mini-button subtle" type="button" onClick={onClearChat}>
           Clear chat
         </button>
+        {syncState.message && (
+          <p className={classNames("upload-message", syncState.error && "error")}>{syncState.message}</p>
+        )}
       </div>
     </section>
   );
@@ -254,9 +347,11 @@ function Sidebar({
   uploadState,
   health,
   healthLoading,
+  syncState,
   collapsed,
   onUpload,
   onRefresh,
+  onSyncServiceNow,
   onNewChat,
   onClearChat,
   onLogout,
@@ -312,7 +407,9 @@ function Sidebar({
                 metrics={metrics}
                 health={health}
                 healthLoading={healthLoading}
+                syncState={syncState}
                 onRefresh={onRefresh}
+                onSyncServiceNow={onSyncServiceNow}
                 onClearChat={onClearChat}
               />
             </>
@@ -358,25 +455,49 @@ function Header({ session, health, healthLoading, onRefresh }) {
   );
 }
 
+function calculateCost(tokensInput, tokensOutput, model = "gpt-4o-mini") {
+  const pricing = {
+    "gpt-4o-mini": { input: 0.150, output: 0.600 },
+    "gpt-3.5-turbo": { input: 0.500, output: 1.500 },
+    "gpt-4": { input: 30.000, output: 60.000 },
+    "gpt-4-turbo": { input: 10.000, output: 30.000 },
+  };
+  const rates = pricing[model] || pricing["gpt-4o-mini"];
+  const inputCost = (tokensInput / 1_000_000) * rates.input;
+  const outputCost = (tokensOutput / 1_000_000) * rates.output;
+  return (inputCost + outputCost).toFixed(5);
+}
+
 function Message({ message }) {
   const isUser = message.role === "user";
+  const showEvidence = !isUser && message.showEvidence;
+  const hasTokens = !isUser && message.tokens;
 
   return (
     <article className={classNames("message", isUser && "user-message")}>
       <div className="avatar">{isUser ? "You" : <Bot size={17} />}</div>
       <div className="message-body">
-        <p>{message.content}</p>
+        {isUser ? <p>{message.content}</p> : <MarkdownAnswer text={message.content} />}
 
-        {!isUser && message.confidence && (
+        {showEvidence && message.confidence && (
           <div className="answer-meta">
             <span className="confidence">{message.confidence.category}</span>
             <span>{Math.round(message.confidence.score * 100)}% confidence</span>
-            <span>{message.confidence.fromDocuments ? "From documents" : "General answer"}</span>
+            <span>Retrieved from indexed documents</span>
           </div>
         )}
 
-        {!isUser && message.sources?.length > 0 && (
-          <div className="sources">
+        {hasTokens && (
+          <div className="answer-meta token-meta">
+            <span>🔢 {formatNumber(message.tokens.input)} in</span>
+            <span>🔤 {formatNumber(message.tokens.output)} out</span>
+            <span>💰 ${calculateCost(message.tokens.input, message.tokens.output)}</span>
+          </div>
+        )}
+
+        {showEvidence && message.sources?.length > 0 && (
+          <div className="sources evidence-panel">
+            <div className="evidence-title">Retrieved from</div>
             {message.sources.map((source, index) => (
               <div className="source" key={`${source.document}-${source.page}-${index}`}>
                 <FileText size={15} />
@@ -432,6 +553,7 @@ function App() {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState("");
   const [uploadState, setUploadState] = useState({ loading: false, message: "", error: false });
+  const [syncState, setSyncState] = useState({ loading: false, message: "", error: false });
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const transcriptRef = useRef(null);
 
@@ -496,18 +618,30 @@ function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ question, platform: "web", user_id: session?.name }),
       });
+      const sources = result.sources || [];
+      const showEvidence = result.intent === "documentation_question" && sources.length > 0;
 
       setMessages((current) => [
         ...current,
         {
           role: "assistant",
           content: result.answer,
-          confidence: {
-            score: result.confidence_score,
-            category: result.confidence_category,
-            fromDocuments: result.is_from_documents,
-          },
-          sources: result.sources || [],
+          confidence: showEvidence
+            ? {
+                score: result.confidence_score,
+                category: result.confidence_category,
+                fromDocuments: result.is_from_documents,
+              }
+            : null,
+          sources,
+          showEvidence,
+          tokens: result.tokens_total
+            ? {
+                input: result.tokens_input || 0,
+                output: result.tokens_output || 0,
+                total: result.tokens_total || 0,
+              }
+            : null,
         },
       ]);
       refreshStatus();
@@ -547,6 +681,23 @@ function App() {
     }
   }
 
+  async function syncServiceNow() {
+    if (syncState.loading) return;
+
+    setSyncState({ loading: true, message: "Fetching ServiceNow articles...", error: false });
+    try {
+      const result = await requestJson("/sync/servicenow", { method: "POST" });
+      setSyncState({
+        loading: false,
+        message: `Indexed ${result.indexed} chunks from ${result.articles} articles.`,
+        error: false,
+      });
+      refreshAdminData();
+    } catch (err) {
+      setSyncState({ loading: false, message: err.message, error: true });
+    }
+  }
+
   useEffect(() => {
     if (session) {
       refreshStatus();
@@ -574,9 +725,11 @@ function App() {
         uploadState={uploadState}
         health={health}
         healthLoading={healthLoading}
+        syncState={syncState}
         collapsed={sidebarCollapsed}
         onUpload={uploadDocument}
         onRefresh={refreshAdminData}
+        onSyncServiceNow={syncServiceNow}
         onNewChat={() => {
           setMessages([]);
           setError("");
@@ -622,15 +775,17 @@ function App() {
             askQuestion();
           }}
         >
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask a question about your documents..."
-            maxLength={1000}
-          />
-          <button type="submit" disabled={!canAsk} aria-label="Send question">
-            {asking ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
-          </button>
+          <div>
+            <input
+              value={input}
+              onChange={(event) => setInput(event.target.value)}
+              placeholder="Ask a question about your documents..."
+              maxLength={1000}
+            />
+            <button type="submit" disabled={!canAsk} aria-label="Send question">
+              {asking ? <Loader2 className="spin" size={19} /> : <Send size={19} />}
+            </button>
+          </div>
         </form>
       </section>
     </main>

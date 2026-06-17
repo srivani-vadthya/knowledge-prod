@@ -41,6 +41,10 @@ PINECONE_API_KEY=your_pinecone_api_key
 PINECONE_INDEX_NAME=your_index_name
 PINECONE_CLOUD=aws
 PINECONE_REGION=us-east-1
+SERVICENOW_INSTANCE=https://your-instance.service-now.com
+SERVICENOW_USERNAME=your_servicenow_username
+SERVICENOW_PASSWORD=your_servicenow_password
+SERVICENOW_PINECONE_NAMESPACE=
 ```
 
 Frontend:
@@ -60,3 +64,19 @@ VITE_USER_CODE=
 
 Set `VITE_API_BASE_URL` on the web service to your deployed API URL.
 Set `VITE_ADMIN_CODE` to the code admins should use on the frontend login screen.
+
+## ServiceNow Sync
+
+Run a dry check without writing vectors:
+
+```bash
+python sync.py --dry-run
+```
+
+Sync published ServiceNow knowledge articles into Pinecone:
+
+```bash
+python sync.py
+```
+
+Admins can also run the same sync from the frontend maintenance panel with **Sync ServiceNow**.

@@ -4,6 +4,7 @@ langchain-community
 langchain-core
 langchain-openai
 langchain-text-splitters
+langchain-pinecone
 pinecone
 openai
 PyMuPDF
@@ -19,3 +20,11 @@ pandas
 python-pptx
 markdown
 beautifulsoup4
+requests
+
+# Image Processing & OCR
+Pillow
+easyocr
+pytesseract
+pdf2image
+numpy

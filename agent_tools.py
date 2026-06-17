@@ -19,8 +19,6 @@ def list_documents_tool() -> dict:
             "count": len(documents),
         },
     }
-
-
 def search_documents_tool(query: str, top_k: int = 5) -> dict:
     return search_knowledge_base(query=query, top_k=top_k)
 
@@ -32,8 +30,6 @@ def summarize_documents_tool(query: str, top_k: int = 8) -> dict:
         "chunks_used": len(result.get("context_chunks", [])),
     }
     return result
-
-
 def compare_documents_tool(query: str, top_k: int = 10) -> dict:
     result = search_knowledge_base(query=query, top_k=top_k)
     result["tool_result"] = {

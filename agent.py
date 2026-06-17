@@ -46,6 +46,9 @@ class State(TypedDict):
     answer: str
     verification: str
     confidence: dict
+    tokens_input: int
+    tokens_output: int
+    tokens_total: int
 
 llm = ChatOpenAI(
     api_key=os.getenv("OPENAI_API_KEY"),
@@ -58,6 +61,13 @@ def get_intent(state):
         return normalize_intent(existing_intent, state["question"])
 
     response = llm.invoke(build_intent_prompt(state["question"]))
+    
+    # Track tokens
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+        state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+        state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
+    
     return normalize_intent(response.content, state["question"])
 
 def format_memory(memory):
@@ -95,6 +105,13 @@ def plan_node(state):
         question=state["question"],
         memory=memory_text,
     ))
+    
+    # Track tokens
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+        state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+        state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
+    
     plan = parse_tool_plan(response.content, state["question"])
 
     return {
@@ -144,6 +161,13 @@ def generate_node(state):
             question=state["question"],
             memory=memory_text,
         ))
+        
+        # Track tokens
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+            state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+            state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
+        
         answer = (response.content or "").strip() or CONVERSATIONAL_FALLBACK_RESPONSE
         return {**state, "answer": answer}
 
@@ -152,6 +176,13 @@ def generate_node(state):
             question=state["question"],
             memory=memory_text,
         ))
+        
+        # Track tokens
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+            state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+            state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
+        
         answer = (response.content or "").strip() or CONVERSATIONAL_FALLBACK_RESPONSE
         return {**state, "answer": answer}
 
@@ -165,6 +196,12 @@ def generate_node(state):
         memory=memory_text,
     )
     response = llm.invoke(prompt)
+    
+    # Track tokens
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+        state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+        state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
 
     return {**state, "answer": strip_embedded_sources(response.content)}
 
@@ -202,6 +239,13 @@ def verify_node(state):
         question=state["question"],
         answer=answer,
     ))
+    
+    # Track tokens
+    if hasattr(response, 'usage_metadata') and response.usage_metadata:
+        state["tokens_input"] = state.get("tokens_input", 0) + response.usage_metadata.get('input_tokens', 0)
+        state["tokens_output"] = state.get("tokens_output", 0) + response.usage_metadata.get('output_tokens', 0)
+        state["tokens_total"] = state.get("tokens_total", 0) + response.usage_metadata.get('total_tokens', 0)
+    
     verification = normalize_verification(response.content)
 
     if verification != "supported":

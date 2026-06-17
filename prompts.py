@@ -9,7 +9,7 @@ FALLBACK_RESPONSE = (
 
 CONVERSATIONAL_FALLBACK_RESPONSE = "I am here to help. What would you like to ask?"
 
-DEFAULT_MODEL = "gpt-5.2"
+DEFAULT_MODEL = "gpt-4o-mini"
 
 def _normalize_message(message: str) -> str:
     text = (message or "").strip().lower()
@@ -385,12 +385,14 @@ Provide a direct and concise answer.
 
 #### For Detailed or Complex Questions
 
-Use:
+Use clean Markdown formatting:
 
-* Clear headings
-* Bullet points
-* Numbered lists
-* Tables when appropriate
+* Use `##` or `###` headings when the document has clear sections or the answer has multiple parts.
+* Use bullet points for grouped details.
+* Use numbered lists for step-by-step procedures.
+* Use tables when comparing items.
+* Preserve useful section headings from the document when summarizing.
+* Do not wrap the answer in a code block.
 
 Organize information logically and professionally.
 

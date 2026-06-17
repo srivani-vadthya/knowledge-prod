@@ -8,6 +8,7 @@ from openai import OpenAI
 from answer_confidence import simple_answer_confidence
 from ingest import ingest_document
 from observability import logger, metrics, trace_request, log_agent_execution, request_id_var
+from sync import sync_servicenow
 from utils import load_indexed_docs, save_indexed_doc
 import os
 import shutil
@@ -103,6 +104,10 @@ class QuestionResponse(BaseModel):
     is_from_documents: bool = Field(..., description="Whether answer is from indexed documents")
     sources: List[SourceInfo] = Field(default_factory=list, description="Source documents used")
     user_id: Optional[str] = None
+    intent: Optional[str] = None
+    tokens_input: int = 0
+    tokens_output: int = 0
+    tokens_total: int = 0
 
 class ErrorResponse(BaseModel):
     error: str
@@ -185,6 +190,17 @@ async def get_documents():
         "count": len(documents)
     }
 
+@app.post("/sync/servicenow")
+@trace_request("sync_servicenow")
+async def sync_servicenow_documents():
+    """Fetch ServiceNow knowledge articles and index them into Pinecone"""
+    try:
+        result = sync_servicenow()
+        return {"status": "success", **result}
+    except Exception as e:
+        logger.error("ServiceNow sync failed", error=str(e))
+        raise HTTPException(status_code=500, detail=f"ServiceNow sync failed: {str(e)}")
+
 @app.post("/ask", response_model=QuestionResponse, responses={
     400: {"model": ErrorResponse, "description": "Bad Request - Invalid input"},
     500: {"model": ErrorResponse, "description": "Internal Server Error"}
@@ -211,13 +227,19 @@ async def ask_question(request: QuestionRequest):
             "memory": [],
             "context": "",
             "intent": "",
-            "answer": ""
+            "answer": "",
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "tokens_total": 0
         })
         
         answer = result["answer"]
         intent = result.get("intent", "documentation_question")
         confidence = result.get("confidence", {})
         raw_sources = result.get("sources", [])
+        tokens_input = result.get("tokens_input", 0)
+        tokens_output = result.get("tokens_output", 0)
+        tokens_total = result.get("tokens_total", 0)
         sources = [
             SourceInfo(
                 document=source.get("document", "Unknown"),
@@ -236,9 +258,13 @@ async def ask_question(request: QuestionRequest):
             confidence_score,
             len(sources)
         )
-        metrics.record_token_estimate(
-            prompt_tokens=estimate_tokens(request.question),
-            completion_tokens=estimate_tokens(answer),
+        
+        logger.info(
+            "Token usage",
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            tokens_total=tokens_total,
+            component="tokens"
         )
         
         return QuestionResponse(
@@ -248,7 +274,11 @@ async def ask_question(request: QuestionRequest):
             confidence_category=confidence_category,
             is_from_documents=is_from_documents,
             sources=sources if intent == "documentation_question" else [],
-            user_id=request.user_id
+            user_id=request.user_id,
+            intent=intent,
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            tokens_total=tokens_total,
         )
     
     except ValueError as e:
@@ -306,12 +336,18 @@ async def execute_agent(request: ExecuteRequest):
             "memory": [],
             "context": "",
             "intent": "",
-            "answer": ""
+            "answer": "",
+            "tokens_input": 0,
+            "tokens_output": 0,
+            "tokens_total": 0
         })
         
         answer = result["answer"]
         intent = result.get("intent", "documentation_question")
         confidence = result.get("confidence", {})
+        tokens_input = result.get("tokens_input", 0)
+        tokens_output = result.get("tokens_output", 0)
+        tokens_total = result.get("tokens_total", 0)
         sources = [
             {
                 "document": source.get("document", "Unknown"),
@@ -321,9 +357,12 @@ async def execute_agent(request: ExecuteRequest):
             for source in result.get("sources", [])[:3]
         ]
         
-        metrics.record_token_estimate(
-            prompt_tokens=estimate_tokens(request.query),
-            completion_tokens=estimate_tokens(answer),
+        logger.info(
+            "Token usage for execute",
+            tokens_input=tokens_input,
+            tokens_output=tokens_output,
+            tokens_total=tokens_total,
+            component="tokens"
         )
 
         return {
@@ -338,7 +377,10 @@ async def execute_agent(request: ExecuteRequest):
                 "intent": intent,
                 "selected_tool": result.get("selected_tool"),
                 "verification": result.get("verification"),
-                "total_chunks_retrieved": len(result.get("context_chunks", []))
+                "total_chunks_retrieved": len(result.get("context_chunks", [])),
+                "tokens_input": tokens_input,
+                "tokens_output": tokens_output,
+                "tokens_total": tokens_total
             }
         }
     
