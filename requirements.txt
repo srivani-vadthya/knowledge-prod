@@ -12,6 +12,7 @@ python-dotenv
 pypdf
 fastapi
 uvicorn[standard]
+gunicorn
 pydantic
 python-docx
 python-multipart
