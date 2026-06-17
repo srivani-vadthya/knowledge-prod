@@ -4,30 +4,10 @@ services:
     runtime: python
     region: oregon
     plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: python run_server.py
+    buildCommand: pip install fastapi uvicorn
+    startCommand: uvicorn test_api:app --host 0.0.0.0 --port $PORT --log-level info
     healthCheckPath: /health
     envVars:
-      - key: OPENAI_API_KEY
-        sync: false
-      - key: OPENAI_MODEL
-        value: gpt-4o-mini
-      - key: PINECONE_API_KEY
-        sync: false
-      - key: PINECONE_INDEX_NAME
-        sync: false
-      - key: PINECONE_CLOUD
-        value: aws
-      - key: PINECONE_REGION
-        value: us-east-1
-      - key: SERVICENOW_INSTANCE
-        sync: false
-      - key: SERVICENOW_USERNAME
-        sync: false
-      - key: SERVICENOW_PASSWORD
-        sync: false
-      - key: ENABLE_IMAGE_PROCESSING
-        value: false
       - key: PYTHON_VERSION
         value: 3.11.0
 
