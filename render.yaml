@@ -5,11 +5,9 @@ services:
     region: oregon
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: uvicorn api:app --host 0.0.0.0 --port $PORT --workers 1
+    startCommand: python -m uvicorn api:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /health
     envVars:
-      - key: PORT
-        value: 10000
       - key: OPENAI_API_KEY
         sync: false
       - key: OPENAI_MODEL
@@ -30,6 +28,8 @@ services:
         sync: false
       - key: ENABLE_IMAGE_PROCESSING
         value: false
+      - key: PYTHON_VERSION
+        value: 3.11.0
 
   - type: web
     name: knowledge-assistant-web
